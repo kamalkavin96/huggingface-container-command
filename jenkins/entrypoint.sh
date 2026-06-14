@@ -4,6 +4,7 @@ LOCAL_PATH=/var/jenkins_home
 
 RSYNC_OPTS="-a --no-owner --no-group --force"
 RSYNC_EXCLUDE="--exclude=workspace/ --exclude=war/ --exclude=*.log --exclude=*.tmp --exclude=.lock"
+# RSYNC_EXCLUDE="--exclude=workspace/ --exclude=war/ --exclude=*.log --exclude=*.tmp --exclude=.lock --exclude=.cache/ --exclude=.java/ --exclude=.~tmp~/"
 
 # ── Startup restore ────────────────────────────────────────────────────────────
 echo "==> Checking bucket accessibility..."
@@ -39,15 +40,45 @@ chown -R jenkins:jenkins "$LOCAL_PATH/"
 # ── Background sync loop ───────────────────────────────────────────────────────
 do_sync() {
   local TIMEOUT=$1
+  local PIDS=()
+  local FAILED=0
 
-  # Secrets first
+  # Secrets first — always single stream, critical
   timeout 30 rsync $RSYNC_OPTS $RSYNC_EXCLUDE \
     "$LOCAL_PATH/secrets/" "$BUCKET_PATH/secrets/" 2>/dev/null
 
-  # Full sync
-  timeout "$TIMEOUT" rsync $RSYNC_OPTS $RSYNC_EXCLUDE \
-    --delete --delete-during --timeout=30 \
-    "$LOCAL_PATH/" "$BUCKET_PATH/"
+  # Parallel streams
+  ( timeout "$TIMEOUT" rsync $RSYNC_OPTS $RSYNC_EXCLUDE \
+      --delete --delete-during --timeout=30 \
+      "$LOCAL_PATH/jobs/" "$BUCKET_PATH/jobs/" ) &
+  PIDS+=($!)
+
+  ( timeout "$TIMEOUT" rsync $RSYNC_OPTS $RSYNC_EXCLUDE \
+      --delete --delete-during --timeout=30 \
+      "$LOCAL_PATH/plugins/" "$BUCKET_PATH/plugins/" ) &
+  PIDS+=($!)
+
+  ( timeout "$TIMEOUT" rsync $RSYNC_OPTS $RSYNC_EXCLUDE \
+      --delete --delete-during --timeout=30 \
+      "$LOCAL_PATH/users/" "$BUCKET_PATH/users/" ) &
+  PIDS+=($!)
+
+  ( timeout "$TIMEOUT" rsync $RSYNC_OPTS $RSYNC_EXCLUDE \
+      --delete --delete-during --timeout=30 \
+      --exclude=jobs/ --exclude=plugins/ --exclude=users/ --exclude=secrets/ \
+      "$LOCAL_PATH/" "$BUCKET_PATH/" ) &
+  PIDS+=($!)
+
+  # Wait for all and collect failures
+  for PID in "${PIDS[@]}"; do
+    wait "$PID" || FAILED=$((FAILED + 1))
+  done
+
+  if [ "$FAILED" -gt 0 ]; then
+    echo "[$(date '+%H:%M:%S')] $FAILED stream(s) failed"
+    return 1
+  fi
+  return 0
 }
 
 (
@@ -77,13 +108,14 @@ SYNC_PID=$!
 # ── Shutdown handler ───────────────────────────────────────────────────────────
 cleanup() {
   echo "==> Final sync before shutdown..."
+  kill $SYNC_PID 2>/dev/null
+  wait $SYNC_PID 2>/dev/null
   timeout 30 rsync $RSYNC_OPTS $RSYNC_EXCLUDE \
     "$LOCAL_PATH/secrets/" "$BUCKET_PATH/secrets/"
   timeout 180 rsync $RSYNC_OPTS $RSYNC_EXCLUDE \
     --delete --delete-during \
     "$LOCAL_PATH/" "$BUCKET_PATH/"
   echo "==> Shutdown sync complete"
-  kill $SYNC_PID 2>/dev/null
   exit 0
 }
 trap cleanup SIGTERM SIGINT
