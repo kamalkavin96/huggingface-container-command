@@ -3,10 +3,11 @@ FROM jenkins/jenkins:lts-jdk17
 USER root
 RUN apt-get update && apt-get install -y docker.io rsync curl
 
-# Jenkins runs on fast local disk
 ENV JENKINS_HOME=/var/jenkins_home
 
-# Add current timestamp to bust Docker cache on every build
+# Change this value to force HuggingFace to rebuild fresh every time
+ARG CACHE_BUST=3
+
 ADD https://raw.githubusercontent.com/kamalkavin96/huggingface-container-command/refs/heads/main/jenkins/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh && chown jenkins:jenkins /entrypoint.sh
 
