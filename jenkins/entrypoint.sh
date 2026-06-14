@@ -1,4 +1,13 @@
 #!/bin/bash
+
+VERSION="1.0.1"
+LAST_UPDATED="2026-06-14"
+ 
+echo "================================================"
+echo " Jenkins Entrypoint v${VERSION} (${LAST_UPDATED})"
+echo "================================================"
+
+
 BUCKET_PATH=/data/jenkins_home
 LOCAL_PATH=/var/jenkins_home
 
