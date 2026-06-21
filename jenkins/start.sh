@@ -14,20 +14,18 @@ echo "Installing/Starting Jenkins..."
 # Install Java if not already installed
 if ! command -v java >/dev/null 2>&1; then
     apt-get update
-    # apt-get install -y fontconfig openjdk-17-jre
     apt-get install -y fontconfig openjdk-21-jre
 fi
 
 # Install Jenkins if not already installed
-if ! command -v jenkins >/dev/null 2>&1; then
+if [ ! -f /usr/share/jenkins/jenkins.war ]; then
     apt-get update
-    apt-get install -y curl gnupg2
+    apt-get install -y curl
 
-    curl -fsSL https://pkg.jenkins.io/debian-stable/jenkins.io-2023.key | tee /usr/share/keyrings/jenkins-keyring.asc > /dev/null
-    echo "deb [signed-by=/usr/share/keyrings/jenkins-keyring.asc] https://pkg.jenkins.io/debian-stable binary/" | tee /etc/apt/sources.list.d/jenkins.list > /dev/null
-
-    apt-get update
-    apt-get install -y jenkins
+    # Download Jenkins WAR directly — avoids apt repo GPG issues entirely
+    JENKINS_VERSION="2.504.1"
+    curl -fsSL -o /usr/share/jenkins/jenkins.war \
+        https://get.jenkins.io/war-stable/${JENKINS_VERSION}/jenkins.war
 fi
 
 # Create persistent data directory
