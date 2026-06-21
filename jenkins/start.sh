@@ -118,6 +118,7 @@ cleanup() {
     "$LOCAL_PATH/" "$BUCKET_PATH/" || true
   echo "==> Shutdown sync complete"
   kill $SYNC_PID 2>/dev/null || true
+  kill $JENKINS_PID 2>/dev/null || true
   kill $FASTAPI_PID 2>/dev/null || true
   exit 0
 }
