@@ -14,7 +14,8 @@ echo "Installing/Starting Jenkins..."
 # Install Java if not already installed
 if ! command -v java >/dev/null 2>&1; then
     apt-get update
-    apt-get install -y fontconfig openjdk-17-jre
+    # apt-get install -y fontconfig openjdk-17-jre
+    apt-get install -y fontconfig openjdk-21-jre
 fi
 
 # Install Jenkins if not already installed
