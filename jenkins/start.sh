@@ -28,7 +28,7 @@ if [ ! -f /usr/share/jenkins/jenkins.war ]; then
     apt-get install -y curl
     mkdir -p /usr/share/jenkins
     # JENKINS_VERSION="2.504.1"
-    JENKINS_VERSION="2.541.3"
+    JENKINS_VERSION="2.555.3"
     curl -fsSL -o /usr/share/jenkins/jenkins.war \
         https://get.jenkins.io/war-stable/${JENKINS_VERSION}/jenkins.war
 fi
