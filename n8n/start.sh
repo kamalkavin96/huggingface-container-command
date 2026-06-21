@@ -31,7 +31,6 @@ mkdir -p /data
 N8N_USER_FOLDER=/data \
 N8N_PORT=3000 \
 N8N_PROTOCOL=http \
-N8N_HOST=0.0.0.0 \
 EXECUTIONS_DATA_PRUNE=true \
 EXECUTIONS_DATA_MAX_AGE=168 \
 n8n start &
