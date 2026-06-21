@@ -1,6 +1,6 @@
 FROM python:3.13-slim
 
-ARG CACHE_BUSTER=8
+ARG CACHE_BUSTER=9
 
 ENV PYTHONUNBUFFERED=1
 
@@ -25,4 +25,4 @@ RUN curl -fsSL https://raw.githubusercontent.com/kamalkavin96/huggingface-contai
 
 EXPOSE 7860
 
-CMD ["/app/cmd/start.sh"]
+CMD ["/app/start.sh"]
