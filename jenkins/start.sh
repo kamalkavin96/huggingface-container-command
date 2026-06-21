@@ -1,6 +1,6 @@
 #!/bin/bash
-VERSION="1.0.4"
-LAST_UPDATED="2026-06-14"
+VERSION="1.0.5"
+LAST_UPDATED="2026-06-21"
 set -e
 
 echo "================================================"
@@ -22,15 +22,20 @@ if ! command -v java >/dev/null 2>&1; then
     apt-get install -y fontconfig openjdk-21-jre
 fi
 
-# Download Jenkins WAR if not already present
-if [ ! -f /usr/share/jenkins/jenkins.war ]; then
+# Download Jenkins WAR if not already present or version changed
+JENKINS_VERSION="2.541.3"
+JENKINS_WAR="/usr/share/jenkins/jenkins.war"
+VERSION_FILE="/usr/share/jenkins/.jenkins_version"
+
+if [ ! -f "$JENKINS_WAR" ] || [ ! -f "$VERSION_FILE" ] || [ "$(cat $VERSION_FILE)" != "$JENKINS_VERSION" ]; then
+    echo "==> Downloading Jenkins $JENKINS_VERSION..."
     apt-get update -qq
     apt-get install -y curl
     mkdir -p /usr/share/jenkins
-    # JENKINS_VERSION="2.504.1"
-    JENKINS_VERSION="2.555.3"
-    curl -fsSL -o /usr/share/jenkins/jenkins.war \
+    curl -fsSL -o "$JENKINS_WAR" \
         https://get.jenkins.io/war-stable/${JENKINS_VERSION}/jenkins.war
+    echo "$JENKINS_VERSION" > "$VERSION_FILE"
+    echo "==> Jenkins $JENKINS_VERSION downloaded"
 fi
 
 # Ensure jenkins user exists
@@ -129,7 +134,11 @@ trap cleanup SIGTERM SIGINT
 echo "==> Starting Jenkins on port 3000..."
 JENKINS_HOME="$LOCAL_PATH" \
 su -s /bin/bash jenkins -c \
-  "java -jar /usr/share/jenkins/jenkins.war --httpPort=3000 --httpListenAddress=0.0.0.0" &
+  "java \
+    -Djenkins.model.Jenkins.crumbIssuerProxyCompatibility=true \
+    -jar /usr/share/jenkins/jenkins.war \
+    --httpPort=3000 \
+    --httpListenAddress=0.0.0.0" &
 JENKINS_PID=$!
 
 # Wait for either process to exit
