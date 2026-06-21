@@ -21,11 +21,9 @@ RUN cp nginx/nginx.conf /etc/nginx/nginx.conf
 RUN cp nginx/index.html /usr/share/nginx/html/index.html
 
 # Use start.sh from the cloned repo directly
-RUN chmod +x /app/cmd/start.sh
+COPY start.sh /app/start.sh
+RUN chmod +x /app/start.sh
 
 EXPOSE 7860
 
-CMD ["/app/cmd/start.sh"]
-
-# CMD sh -c "nginx && python src/main.py && /start.sh"
-# CMD ["/start.sh"]
+CMD ["/app/start.sh"]
