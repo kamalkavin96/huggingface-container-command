@@ -1,56 +1,11 @@
-# #!/bin/sh
-
-# set -e
-
-# echo "Starting Nginx..."
-# nginx
-
-# echo "Starting FastTerm..."
-# python /app/src/main.py &
-# FASTAPI_PID=$!
-
-# echo "Installing/Starting Jenkins..."
-
-# # Install Java if not already installed
-# if ! command -v java >/dev/null 2>&1; then
-#     apt-get update
-#     apt-get install -y fontconfig openjdk-21-jre
-# fi
-
-# # Install Jenkins WAR if not already present
-# if [ ! -f /data/jenkins/jenkins.war ]; then
-#     apt-get update
-#     apt-get install -y curl
-
-#     mkdir -p /data/jenkins
-
-#     JENKINS_VERSION="2.504.1"
-#     curl -fsSL -o /data/jenkins/jenkins.war \
-#         https://get.jenkins.io/war-stable/${JENKINS_VERSION}/jenkins.war
-# fi
-
-# # Create persistent data directory
-# mkdir -p /data/jenkins
-
-# # Start Jenkins in background pointing to /data/jenkins for persistence
-# JENKINS_HOME=/data/jenkins \
-# java -jar /data/jenkins/jenkins.war \
-#     --httpPort=3000 \
-#     --httpListenAddress=0.0.0.0 &
-
-# wait $FASTAPI_PID
-
-
-
-
-
-
 #!/bin/bash
-
 VERSION="1.0.4"
 LAST_UPDATED="2026-06-14"
-
 set -e
+
+echo "================================================"
+echo " Jenkins Entrypoint v${VERSION} (${LAST_UPDATED})"
+echo "================================================"
 
 echo "Starting Nginx..."
 nginx
@@ -60,15 +15,30 @@ python /app/src/main.py &
 FASTAPI_PID=$!
 
 echo "Installing/Starting Jenkins..."
- 
-echo "================================================"
-echo " Jenkins Entrypoint v${VERSION} (${LAST_UPDATED})"
-echo "================================================"
 
+# Install Java if not already installed
+if ! command -v java >/dev/null 2>&1; then
+    apt-get update -qq
+    apt-get install -y fontconfig openjdk-21-jre
+fi
+
+# Download Jenkins WAR if not already present
+if [ ! -f /usr/share/jenkins/jenkins.war ]; then
+    apt-get update -qq
+    apt-get install -y curl
+    mkdir -p /usr/share/jenkins
+    JENKINS_VERSION="2.504.1"
+    curl -fsSL -o /usr/share/jenkins/jenkins.war \
+        https://get.jenkins.io/war-stable/${JENKINS_VERSION}/jenkins.war
+fi
+
+# Ensure jenkins user exists
+if ! id -u jenkins >/dev/null 2>&1; then
+    useradd -m -d /var/jenkins_home -s /bin/bash jenkins
+fi
 
 BUCKET_PATH=/data/jenkins_home
 LOCAL_PATH=/var/jenkins_home
-
 RSYNC_OPTS="-a --no-owner --no-group --force"
 RSYNC_EXCLUDE="--exclude=workspace/ --exclude=war/ --exclude=*.log --exclude=*.tmp --exclude=.lock"
 
@@ -81,16 +51,16 @@ else
   rsync $RSYNC_OPTS $RSYNC_EXCLUDE \
     "$BUCKET_PATH/secrets/" "$LOCAL_PATH/secrets/" \
   && echo "==> Secrets restored OK" \
-  || echo "==> Secrets restore failed"
+  || echo "==> Secrets restore failed (may not exist yet)"
 
-  rsync $RSYNC_OPTS "$BUCKET_PATH/identity.key.enc" "$LOCAL_PATH/" 2>/dev/null
-  rsync $RSYNC_OPTS "$BUCKET_PATH/secret.key"       "$LOCAL_PATH/" 2>/dev/null
+  rsync $RSYNC_OPTS "$BUCKET_PATH/identity.key.enc" "$LOCAL_PATH/" 2>/dev/null || true
+  rsync $RSYNC_OPTS "$BUCKET_PATH/secret.key"       "$LOCAL_PATH/" 2>/dev/null || true
 
-  echo "==> Restoring full Jenkins state (no timeout — waiting for completion)..."
+  echo "==> Restoring full Jenkins state..."
   rsync $RSYNC_OPTS $RSYNC_EXCLUDE \
     "$BUCKET_PATH/" "$LOCAL_PATH/" \
   && echo "==> Full restore done" \
-  || echo "==> Restore failed"
+  || echo "==> Restore failed (may not exist yet)"
 fi
 
 # ── Key consistency check ──────────────────────────────────────────────────────
@@ -101,17 +71,14 @@ if [ -f "$IDENTITY_KEY" ] && [ ! -f "$MASTER_KEY" ]; then
   rm -f "$IDENTITY_KEY"
 fi
 
+mkdir -p "$LOCAL_PATH"
 chown -R jenkins:jenkins "$LOCAL_PATH/"
 
 # ── Background sync loop ───────────────────────────────────────────────────────
 do_sync() {
   local TIMEOUT=$1
-
-  # Secrets first
   timeout 30 rsync $RSYNC_OPTS $RSYNC_EXCLUDE \
-    "$LOCAL_PATH/secrets/" "$BUCKET_PATH/secrets/" 2>/dev/null
-
-  # Full sync
+    "$LOCAL_PATH/secrets/" "$BUCKET_PATH/secrets/" 2>/dev/null || true
   timeout "$TIMEOUT" rsync $RSYNC_OPTS $RSYNC_EXCLUDE \
     --delete --delete-during --timeout=30 \
     "$LOCAL_PATH/" "$BUCKET_PATH/"
@@ -145,16 +112,23 @@ SYNC_PID=$!
 cleanup() {
   echo "==> Final sync before shutdown..."
   timeout 30 rsync $RSYNC_OPTS $RSYNC_EXCLUDE \
-    "$LOCAL_PATH/secrets/" "$BUCKET_PATH/secrets/"
+    "$LOCAL_PATH/secrets/" "$BUCKET_PATH/secrets/" || true
   timeout 180 rsync $RSYNC_OPTS $RSYNC_EXCLUDE \
     --delete --delete-during \
-    "$LOCAL_PATH/" "$BUCKET_PATH/"
+    "$LOCAL_PATH/" "$BUCKET_PATH/" || true
   echo "==> Shutdown sync complete"
-  kill $SYNC_PID 2>/dev/null
+  kill $SYNC_PID 2>/dev/null || true
+  kill $FASTAPI_PID 2>/dev/null || true
   exit 0
 }
 trap cleanup SIGTERM SIGINT
 
-exec java -jar /usr/share/jenkins/jenkins.war --httpPort=3000
+# ── Start Jenkins ──────────────────────────────────────────────────────────────
+echo "==> Starting Jenkins on port 3000..."
+JENKINS_HOME="$LOCAL_PATH" \
+su -s /bin/bash jenkins -c \
+  "java -jar /usr/share/jenkins/jenkins.war --httpPort=3000 --httpListenAddress=0.0.0.0" &
+JENKINS_PID=$!
 
-wait $FASTAPI_PID
+# Wait for either process to exit
+wait $FASTAPI_PID $JENKINS_PID
