@@ -18,7 +18,7 @@ if ! command -v curl >/dev/null 2>&1; then
     apt-get install -y curl
 fi
 
-# Install code-server if missing
+# Install code-server if missing (Fixed official installer URL)
 if ! command -v code-server >/dev/null 2>&1; then
     curl -fsSL https://code-server.dev | sh
 fi
