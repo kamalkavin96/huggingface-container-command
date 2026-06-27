@@ -18,9 +18,21 @@ if ! command -v curl >/dev/null 2>&1; then
     apt-get install -y curl
 fi
 
-# Install code-server if missing (Fixed official installer URL)
+# Install code-server using static archive fallback if missing
 if ! command -v code-server >/dev/null 2>&1; then
-    curl -fsSL https://code-server.dev | sh
+    echo "Downloading stable code-server archive..."
+    # Downloads stable static linux-amd64 binary asset version directly 
+    curl -fL -o /tmp/code-server.tar.gz https://github.com
+    
+    echo "Extracting binary components..."
+    tar -xzf /tmp/code-server.tar.gz -C /tmp/
+    
+    echo "Moving binary to local paths..."
+    mv /tmp/code-server-4.91.1-linux-amd64/bin/code-server /usr/local/bin/code-server
+    mv /tmp/code-server-4.91.1-linux-amd64/lib /usr/local/lib/code-server
+    
+    # Clean up temp assets
+    rm -rf /tmp/code-server*
 fi
 
 # Create persistent storage directories inside /data
@@ -30,6 +42,7 @@ mkdir -p /data/workspace
 # Start code-server in background
 HOME=/data/code-server-home \
 PROXY_DOMAIN_PATH="/vs-code" \
+PATH="/usr/local/lib/code-server:$PATH" \
 code-server \
   --bind-addr 0.0.0.0:9001 \
   --auth none \
