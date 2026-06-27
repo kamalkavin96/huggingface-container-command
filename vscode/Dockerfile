@@ -20,8 +20,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 RUN cp nginx/nginx.conf /etc/nginx/nginx.conf
 RUN cp nginx/index.html /usr/share/nginx/html/index.html
 
-# RUN curl -fsSL https://raw.githubusercontent.com/kamalkavin96/huggingface-container-command/refs/heads/main/uptimekuma/start.sh \
-#     -o /app/start.sh && chmod +x /app/start.sh
+RUN curl -fsSL https://raw.githubusercontent.com/kamalkavin96/huggingface-container-command/refs/heads/main/vscode/start.sh \
+    -o /app/start.sh && chmod +x /app/start.sh
 
 EXPOSE 7860
 
