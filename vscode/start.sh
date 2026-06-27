@@ -22,18 +22,32 @@ fi
 if ! command -v code-server >/dev/null 2>&1; then
     echo "Fetching latest stable code-server package metadata..."
     
-    # Query GitHub API safely to extract the actual structural tag string
-    VERSION=$(curl -s https://github.com | jq -r '.tag_name' | sed 's/^v//')
+    # Query GitHub Releases API correctly to get the latest tag
+    VERSION=$(curl -s https://api.github.com/repos/coder/code-server/releases/latest | jq -r '.tag_name' | sed 's/^v//')
+    
+    if [ -z "$VERSION" ] || [ "$VERSION" = "null" ]; then
+        echo "ERROR: Failed to fetch code-server version. Using fallback version..."
+        VERSION="4.92.2"  # Known stable version as fallback
+    fi
     
     echo "Downloading stable Ubuntu package version: v${VERSION}..."
-    # Downloads the compiled native Debian package file directly 
-    curl -fOL "https://github.com/coder/code-server/releases/download/v${VERSION}/code-server_${VERSION}_amd64.deb"
+    DEB_FILE="code-server_${VERSION}_amd64.deb"
     
-    echo "Installing package natively..."
-    dpkg -i "code-server_${VERSION}_amd64.deb"
+    # Download the actual .deb package
+    curl -fL -o "$DEB_FILE" "https://github.com/coder/code-server/releases/download/v${VERSION}/${DEB_FILE}"
     
-    # Clean up installation package
-    rm "code-server_${VERSION}_amd64.deb"
+    # Verify it's actually a deb file
+    if file "$DEB_FILE" | grep -q "Debian binary package"; then
+        echo "Installing package natively..."
+        dpkg -i "$DEB_FILE"
+        
+        # Clean up installation package
+        rm "$DEB_FILE"
+    else
+        echo "ERROR: Downloaded file is not a valid .deb package"
+        file "$DEB_FILE"
+        exit 1
+    fi
 fi
 
 # Create persistent storage directories inside /data
