@@ -34,12 +34,23 @@ mkdir -p "$PGDATA" "$NC_APP_DIR" "$NC_DATADIR" "$FASTTERM_SQLITE_DIR" "$FASTTERM
 # (not baked into the image -- installed here every boot)
 # ---------------------------------------------------------------------------
 log "Installing Postgres, PHP-FPM, and dependencies..."
+export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
 apt-get install -y -qq --no-install-recommends \
     postgresql \
     php-fpm php-cli php-pgsql php-gd php-curl php-mbstring \
     php-xml php-zip php-intl php-bcmath php-gmp \
     unzip gosu >/dev/null
+
+# Postgres binaries (initdb, pg_ctl, pg_isready, postgres) live under
+# /usr/lib/postgresql/<version>/bin, not on the default PATH.
+PG_BINDIR="$(find /usr/lib/postgresql -maxdepth 2 -type d -name bin 2>/dev/null | sort -V | tail -n1)"
+if [ -z "$PG_BINDIR" ]; then
+    log "ERROR: could not locate postgres bin directory after install"
+    exit 1
+fi
+export PATH="$PG_BINDIR:$PATH"
+log "Using postgres binaries from $PG_BINDIR"
 
 # postgresql-common's postinst creates the 'postgres' user via adduser but
 # swallows failures -- make sure it exists regardless.
