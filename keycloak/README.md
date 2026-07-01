@@ -1,1 +1,1 @@
-![Description](environment_variable_list.png)
+![Description](environment_varliable_list.png)
