@@ -8,10 +8,13 @@ log() {
 
 log "===== Application Startup ====="
 
+NEXTCLOUD_VERSION="${NEXTCLOUD_VERSION:-29.0.4}"
+
 DATA_DIR="${DATA_DIR:-/data}"
 PGDATA="$DATA_DIR/postgres"
-NC_DATADIR="$DATA_DIR/nextcloud-data"
-NC_CONFIG="/var/www/nextcloud/config/config.php"
+NC_APP_DIR="$DATA_DIR/nextcloud-app"     # Nextcloud code + config.php, persisted
+NC_DATADIR="$DATA_DIR/nextcloud-data"    # Nextcloud user files, persisted
+NC_CONFIG="$NC_APP_DIR/config/config.php"
 
 POSTGRES_DB="${POSTGRES_DB:-nextcloud}"
 POSTGRES_USER="${POSTGRES_USER:-nextcloud}"
@@ -21,16 +24,60 @@ NEXTCLOUD_ADMIN_USER="${NEXTCLOUD_ADMIN_USER:-admin}"
 SPACE_HOST="${SPACE_HOST:-localhost}"
 FASTAPI_PORT="${PORT:-8000}"
 
-# FastTerm's own persistent data (SQLite DB + uploaded files) -- also on /data
 FASTTERM_SQLITE_DIR="$DATA_DIR/webterm-db"
 FASTTERM_FILES_DIR="$DATA_DIR/webterm-files"
 
-mkdir -p "$PGDATA" "$NC_DATADIR" "$FASTTERM_SQLITE_DIR" "$FASTTERM_FILES_DIR"
-chown -R postgres:postgres "$PGDATA"
-chown -R www-data:www-data "$NC_DATADIR"
+mkdir -p "$PGDATA" "$NC_APP_DIR" "$NC_DATADIR" "$FASTTERM_SQLITE_DIR" "$FASTTERM_FILES_DIR"
 
 # ---------------------------------------------------------------------------
-# Postgres  (data dir persisted at $PGDATA, under /data)
+# Install Postgres + PHP-FPM + Nextcloud's PHP extensions
+# (not baked into the image -- installed here every boot)
+# ---------------------------------------------------------------------------
+log "Installing Postgres, PHP-FPM, and dependencies..."
+apt-get update -qq
+apt-get install -y -qq --no-install-recommends \
+    postgresql \
+    php-fpm php-cli php-pgsql php-gd php-curl php-mbstring \
+    php-xml php-zip php-intl php-bcmath php-gmp \
+    unzip gosu >/dev/null
+
+# postgresql-common's postinst creates the 'postgres' user via adduser but
+# swallows failures -- make sure it exists regardless.
+if ! id -u postgres >/dev/null 2>&1; then
+    log "postgres system user missing -- creating it"
+    groupadd -r postgres 2>/dev/null || true
+    useradd -r -g postgres -d /var/lib/postgresql -s /bin/bash postgres 2>/dev/null || true
+    mkdir -p /var/lib/postgresql
+fi
+chown -R postgres:postgres "$PGDATA" /var/lib/postgresql
+chown -R www-data:www-data "$NC_DATADIR" "$NC_APP_DIR"
+
+# php-fpm: listen on TCP so nginx (separate process) can reach it
+sed -i "s/^listen = .*/listen = 127.0.0.1:9000/" /etc/php/*/fpm/pool.d/www.conf
+sed -i "s/^;\?listen.owner.*/listen.owner = www-data/" /etc/php/*/fpm/pool.d/www.conf
+sed -i "s/^;\?listen.group.*/listen.group = www-data/" /etc/php/*/fpm/pool.d/www.conf
+
+# ---------------------------------------------------------------------------
+# Nextcloud application code -- download once, persist on /data, symlink in.
+# ---------------------------------------------------------------------------
+if [ ! -f "$NC_APP_DIR/occ" ]; then
+    log "Downloading Nextcloud ${NEXTCLOUD_VERSION} (first run)..."
+    curl -fsSL "https://download.nextcloud.com/server/releases/nextcloud-${NEXTCLOUD_VERSION}.zip" -o /tmp/nc.zip
+    rm -rf "$NC_APP_DIR"
+    unzip -q /tmp/nc.zip -d "$DATA_DIR"
+    mv "$DATA_DIR/nextcloud" "$NC_APP_DIR"
+    rm /tmp/nc.zip
+    chown -R www-data:www-data "$NC_APP_DIR"
+else
+    log "Nextcloud app already present on /data, skipping download."
+fi
+
+rm -rf /var/www/nextcloud
+mkdir -p /var/www
+ln -s "$NC_APP_DIR" /var/www/nextcloud
+
+# ---------------------------------------------------------------------------
+# Postgres
 # ---------------------------------------------------------------------------
 if [ ! -s "$PGDATA/PG_VERSION" ]; then
     log "Initializing Postgres cluster..."
@@ -51,9 +98,8 @@ gosu postgres psql -tc "SELECT 1 FROM pg_database WHERE datname='$POSTGRES_DB'" 
     || gosu postgres psql -c "CREATE DATABASE $POSTGRES_DB OWNER $POSTGRES_USER;"
 
 # ---------------------------------------------------------------------------
-# Nextcloud (installer runs once, skipped on later boots)
-# Served at the domain root via the internal :3000 nginx server -- no
-# subdirectory webroot config needed. Data dir persisted under /data.
+# Nextcloud install (runs once -- config.php now persists on /data, so this
+# is correctly skipped on every boot after the first)
 # ---------------------------------------------------------------------------
 if [ ! -f "$NC_CONFIG" ]; then
     log "Running Nextcloud installer..."
@@ -87,7 +133,7 @@ PHP_FPM_PID=$!
 log "PHP-FPM started with PID: $PHP_FPM_PID"
 
 # ---------------------------------------------------------------------------
-# FastTerm (FastAPI) -- SQLite DB and file storage also on /data
+# FastTerm (FastAPI) -- SQLite DB and file storage on /data
 # ---------------------------------------------------------------------------
 log "Starting FastTerm..."
 PORT="$FASTAPI_PORT" \
@@ -98,15 +144,14 @@ FASTAPI_PID=$!
 log "FastTerm started with PID: $FASTAPI_PID"
 
 # ---------------------------------------------------------------------------
-# Nginx (single process, two server blocks: 7860 public, 3000 internal for
-# Nextcloud)
+# Nginx -- config was already copied to /etc/nginx/nginx.conf by the
+# Dockerfile from the repo (nginx/nginx.conf), no changes needed here.
 # ---------------------------------------------------------------------------
 log "Starting Nginx..."
 nginx || { log "ERROR: Failed to start Nginx"; exit 1; }
 
 # ---------------------------------------------------------------------------
-# Stay alive as long as PHP-FPM and FastAPI are both up. If either dies,
-# exit so the Space restarts the container.
+# Stay alive as long as PHP-FPM and FastAPI are both up.
 # ---------------------------------------------------------------------------
 log "Startup complete. Watching PHP-FPM (PID $PHP_FPM_PID) and FastTerm (PID $FASTAPI_PID)..."
 wait -n "$PHP_FPM_PID" "$FASTAPI_PID"
